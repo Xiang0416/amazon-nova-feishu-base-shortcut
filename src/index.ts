@@ -1,5 +1,5 @@
-import { basekit, FieldType, field, FieldComponent, FieldCode, NumberFormatter, AuthorizationType } from '@lark-opdev/block-basekit-server-api';
-import { BedrockRuntimeClient, ConversationRole, ConverseCommand} from "@aws-sdk/client-bedrock-runtime";
+import { basekit, FieldType, field, FieldComponent, FieldCode } from '@lark-opdev/block-basekit-server-api';
+import CryptoJS from 'crypto-js';
 const { t } = field;
 
 // 通过addDomainList添加请求接口的域名
@@ -156,42 +156,99 @@ basekit.addField({
   // formItemParams 为运行时传入的字段参数，对应字段配置里的 formItems （如引用的依赖字段）
   execute: async (formItemParams , context) => {
     const { prompt, modelType, bedrockEndpoint, accessKey, secretKey } = formItemParams;
-    /** 为方便查看日志，使用此方法替代console.log */
-    function debugLog(arg: any) {
-      console.log(JSON.stringify({
-        formItemParams,
-        context,
-        arg
-      }))
-    }
-
-    // 创建 Bedrock Runtime 客户端
-    const client = new BedrockRuntimeClient({ 
-      endpoint: bedrockEndpoint, // 设置你的 Amazon Bedrock endpoint
-      credentials: {
-          accessKeyId: accessKey,
-          secretAccessKey:  secretKey,
-      }
-    });
-
-    const message = {
-      content: [{ text: prompt }],
-      role: ConversationRole.USER,
-    };
-
-    const request = {
-      modelId: modelType.value,
-      messages: [message],
+    
+    const region = 'us-east-1';
+    const modelId = modelType.value;
+    // 构建请求体
+    const requestBody = JSON.stringify({
+      modelId: modelId,
+      messages: [
+        {
+          role: 'user',
+          content: [{ text: prompt }]
+        }
+      ],
       inferenceConfig: {
         maxTokens: 1000, // The maximum response length
         temperature: 0.7, // Using temperature for randomness control
-      },
-    };
+      }
+    });
 
+    // 构建请求路径和方法
+    const method = 'POST';
+    const path = `/model/${modelId}/converse`;
+    
+    // 获取当前时间
+    const now = new Date();
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+    const dateStamp = amzDate.substring(0, 8);
+    
+    // 准备请求头
+    const headers: Record<string, string> = {
+      'host': bedrockEndpoint,
+      'content-type': 'application/json',
+      'x-amz-date': amzDate
+    };
+    
+    // 创建规范化的请求头
+    let canonicalHeaders = '';
+    let signedHeaders = '';
+    
+    // 按字典顺序排序请求头
+    const sortedHeaders = Object.keys(headers).sort();
+    for (const key of sortedHeaders) {
+      canonicalHeaders += `${key}:${headers[key]}\n`;
+      signedHeaders += `${key};`;
+    }
+    // 移除最后一个分号
+    signedHeaders = signedHeaders.slice(0, -1);
+    
+    // 创建请求负载的哈希
+    const payloadHash = CryptoJS.SHA256(requestBody).toString(CryptoJS.enc.Hex);
+    
+    // 组合规范化请求
+    const modelId_Encode = encodeURIComponent(modelId);
+    const canonicalUri = `/model/${modelId_Encode}/converse`;
+    const canonicalQueryString = '';
+    const canonicalRequest = `${method}\n${canonicalUri}\n${canonicalQueryString}\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+    console.log('canonicalRequest:', canonicalRequest);
+    // 创建待签名字符串
+    const algorithm = 'AWS4-HMAC-SHA256';
+    const service = 'bedrock';
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+    const stringToSign = `${algorithm}\n${amzDate}\n${credentialScope}\n${CryptoJS.SHA256(canonicalRequest).toString(CryptoJS.enc.Hex)}`;
+    console.log('stringToSign:', stringToSign);
+    // 计算签名
+    const kDate = CryptoJS.HmacSHA256(dateStamp, 'AWS4' + secretKey);
+    const kRegion = CryptoJS.HmacSHA256(region, kDate);
+    const kService = CryptoJS.HmacSHA256(service, kRegion);
+    const kSigning = CryptoJS.HmacSHA256('aws4_request', kService);
+    const signature = CryptoJS.HmacSHA256(stringToSign, kSigning).toString(CryptoJS.enc.Hex);
+    
+    // 添加授权头
+    headers['authorization'] = `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
     try {
-        const response = await client.send(new ConverseCommand(request));
-        console.log(response.output.message.content[0].text);
-        const generatedText = response.output.message.content[0].text;
+
+        // 使用fetch API发送请求
+        const response = await context.fetch(`https://${bedrockEndpoint}${path}`, {
+          method,
+          headers,
+          body: requestBody
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.log(`请求失败，状态码: ${response.status}, 响应: ${errorText}`);
+        }
+        // 解析响应
+        const responseBody = await response.json();
+        console.log(responseBody);
+
+
+        // 提取生成的文本
+        //const response = await client.send(new ConverseCommand(request));
+        console.log(responseBody.output.message.content[0].text);
+        const generatedText = responseBody.output.message.content[0].text;
 
         return {
             code: FieldCode.Success,

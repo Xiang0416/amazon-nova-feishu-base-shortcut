@@ -12,11 +12,11 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@lark-opdev/block-basekit-cli": "1.0.4-alpha.24"
+    "@lark-opdev/block-basekit-cli": "1.0.4-alpha.26"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock": "^3.787.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.787.0",
-    "@lark-opdev/block-basekit-server-api": "1.0.4-alpha.24"
+    "@lark-opdev/block-basekit-server-api": "1.0.4-alpha.25",
+    "crypto-js": "^4.2.0",
+    "@types/crypto-js": "^4.2.2"
   }
 }
